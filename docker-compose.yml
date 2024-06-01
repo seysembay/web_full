@@ -1,0 +1,65 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:14.9
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -d ${POSTGRES_DB} -U ${POSTGRES_USER}" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+    expose:
+      - 8080
+    command: bash -c "
+      python manage.py migrate
+      && python manage.py create_roles
+      && python manage.py collectstatic --no-input
+      && python manage.py createsuperuser --noinput
+      && gunicorn web_development.wsgi -b 0.0.0.0:8080
+      "
+    volumes:
+      - static_volume:/staticfiles
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SECRET_KEY: ${SECRET_KEY}
+      DJANGO_SUPERUSER_USERNAME: ${DJANGO_SUPERUSER_USERNAME}
+      DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD}
+      DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL}
+
+  nginx:
+    build: ./nginx
+    volumes:
+      - static_volume:/staticfiles
+    ports:
+      - "8000:80"
+    depends_on:
+      - backend
+
+  web_front:
+    build: ./web_front
+    ports:
+      - "80:80"
+    depends_on:
+      - nginx
+volumes:
+  db-data:
+  static_volume:
